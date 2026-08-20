@@ -10,7 +10,6 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string-in-production}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       DATABASE_URL: sqlite:////app/data/parking.db
-      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
       PARKING_LEVEL_COUNT: ${PARKING_LEVEL_COUNT:-3}
       TW_SLOTS_PER_LEVEL: ${TW_SLOTS_PER_LEVEL:-10}
       FW_SLOTS_PER_LEVEL: ${FW_SLOTS_PER_LEVEL:-10}
@@ -39,7 +38,7 @@ services:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     container_name: parking-frontend
     ports:
-      - "3000:80"
+      - "3000:3000"
     depends_on:
       backend:
         condition: service_healthy

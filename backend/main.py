@@ -3,12 +3,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import get_settings
 from database import SessionLocal, init_db
 from routers import auth_router, booking_router, parking_router
 from seed import seed_all
-
-settings = get_settings()
 
 
 @asynccontextmanager
@@ -24,11 +21,11 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Parking Lot Management API", version="1.0.0", lifespan=lifespan)
 
-origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+# Allow all origins (JWT is sent via Authorization header, not cookies)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

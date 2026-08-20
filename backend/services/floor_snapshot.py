@@ -25,6 +25,11 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
     return _aware(a_start) < _aware(b_end) and _aware(a_end) > _aware(b_start)
 
 
+def _covers_now(start_at: datetime, end_at: datetime, now: datetime | None = None) -> bool:
+    now = now or _now()
+    return _aware(start_at) <= now < _aware(end_at)
+
+
 @dataclass
 class SlotView:
     id: str
@@ -62,17 +67,27 @@ class FloorSnapshot:
         return len(self.occupied_lots)
 
     @property
-    def soft_count(self) -> int:
+    def soft_all_count(self) -> int:
+        """All future/active soft reserves (for admin visibility)."""
         return len(self.soft_bookings)
 
     @property
+    def soft_holding_now(self) -> list[SoftBookingView]:
+        """Soft reserves whose window covers *now* (block walk-in preferred quota)."""
+        now = _now()
+        return [b for b in self.soft_bookings if _covers_now(b.start_at, b.end_at, now)]
+
+    @property
+    def soft_count(self) -> int:
+        return len(self.soft_holding_now)
+
+    @property
     def hard_count(self) -> int:
-        # Don't double-count lots that already have an open stay
         return len([lot for lot in self.hard_assigned_lots if lot not in self.occupied_lots])
 
     @property
     def unreserved_quota(self) -> int:
-        """Preferred walk-in pool size (capacity not held by soft/hard/open stays)."""
+        """Walk-in preferred pool: ignore future soft bookings that do not cover now."""
         return max(0, self.capacity - self.occupied_count - self.soft_count - self.hard_count)
 
     def free_physical_back_first(self) -> list[SlotView]:
@@ -89,7 +104,6 @@ class FloorSnapshot:
             booking = db.get(Booking, booking_id)
             if booking and _overlaps(booking.start_at, booking.end_at, start_at, end_at):
                 count += 1
-        # Open stays consume capacity for any window that intersects [in, +inf)
         for lot in self.occupied_lots:
             hist = db.scalars(
                 select(ParkingHistory).where(
@@ -106,9 +120,10 @@ class FloorSnapshot:
 
     def pick_slot_back_fill(self, allow_steal_soft: bool) -> tuple[SlotView | None, SoftBookingView | None]:
         """
-        Prefer unreserved physical capacity from the back.
-        If quota exhausted, optionally steal soft reserve with farthest start_at.
-        Returns (slot, displaced_soft_or_none).
+        Fill from the back among free physical slots.
+        Prefer unreserved quota (not held by soft-covering-now).
+        If quota is 0, displace a soft booking covering now (farthest end / longest window).
+        Future-only soft bookings do not block walk-in.
         """
         free = self.free_physical_back_first()
         if not free:
@@ -117,11 +132,20 @@ class FloorSnapshot:
         if self.unreserved_quota > 0:
             return free[0], None
 
-        if not allow_steal_soft or not self.soft_bookings:
+        holding = self.soft_holding_now
+        if not allow_steal_soft or not holding:
+            # Physical free but capacity fully held for *now* with nowhere to steal
+            # Still allow walk-in on free physical if nothing covers now — quota bug guard
+            if not holding:
+                return free[0], None
             return None, None
 
-        # Soft bookings already sorted: start_at DESC, duration DESC
-        displaced = self.soft_bookings[0]
+        # Displace least urgent active soft: latest end_at, then longest duration
+        displaced = sorted(
+            holding,
+            key=lambda b: (_aware(b.end_at), b.duration_seconds),
+            reverse=True,
+        )[0]
         return free[0], displaced
 
 
@@ -191,6 +215,7 @@ def load_floor_snapshot(db: Session, level: int, category: str) -> FloorSnapshot
         )
         for b in soft_rows
     ]
+    # Farthest future first (for displacement of future soft if ever needed)
     soft.sort(key=lambda b: (_aware(b.start_at), b.duration_seconds), reverse=True)
 
     return FloorSnapshot(
@@ -231,10 +256,42 @@ def choose_level_for_soft_booking(
 
 
 def recompute_counters_from_snapshots(db: Session) -> None:
-    """Set twa/fwa = unreserved_quota per floor (walk-in preferred availability)."""
+    """Set twa/fwa = walk-in unreserved quota (soft covering *now* only)."""
     spaces = db.scalars(select(ParkingSpace)).all()
     for space in spaces:
         for category, attr in (("TW", "twa"), ("FW", "fwa")):
             snap = load_floor_snapshot(db, space.level, category)
             if snap:
                 setattr(space, attr, snap.unreserved_quota)
+
+
+def soft_reservation_summary(db: Session) -> list[dict]:
+    """Admin summary: soft reserves per floor (lot not assigned yet)."""
+    now = _now()
+    spaces = db.scalars(select(ParkingSpace).order_by(ParkingSpace.level.asc())).all()
+    out: list[dict] = []
+    for space in spaces:
+        row = {
+            "level": space.level,
+            "tw_soft_total": 0,
+            "fw_soft_total": 0,
+            "tw_soft_active_now": 0,
+            "fw_soft_active_now": 0,
+            "tw_available_walkin": space.twa,
+            "fw_available_walkin": space.fwa,
+        }
+        for category, total_key, now_key in (
+            ("TW", "tw_soft_total", "tw_soft_active_now"),
+            ("FW", "fw_soft_total", "fw_soft_active_now"),
+        ):
+            snap = load_floor_snapshot(db, space.level, category)
+            if not snap:
+                continue
+            row[total_key] = snap.soft_all_count
+            row[now_key] = snap.soft_count
+            if category == "TW":
+                row["tw_available_walkin"] = snap.unreserved_quota
+            else:
+                row["fw_available_walkin"] = snap.unreserved_quota
+        out.append(row)
+    return out

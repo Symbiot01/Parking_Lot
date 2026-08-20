@@ -12,6 +12,7 @@ const statusStyles = {
 export default function WorkerDashboard() {
   const [spaces, setSpaces] = useState([])
   const [availability, setAvailability] = useState([])
+  const [softReservations, setSoftReservations] = useState([])
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
@@ -28,12 +29,14 @@ export default function WorkerDashboard() {
   const load = useCallback(async () => {
     setError('')
     try {
-      const [spacesRes, availRes] = await Promise.all([
+      const [spacesRes, availRes, softRes] = await Promise.all([
         api.get('/api/v1/parking/spaces'),
         api.get('/api/v1/parking/availability'),
+        api.get('/api/v1/parking/soft-reservations'),
       ])
       setSpaces(spacesRes.data)
       setAvailability(availRes.data.levels || [])
+      setSoftReservations(softRes.data || [])
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {
@@ -111,20 +114,73 @@ export default function WorkerDashboard() {
             <div key={level.level} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="font-semibold text-slate-900">Level {level.level}</h2>
               <p className="mt-2 text-sm text-slate-600">
-                TW available: <span className="font-semibold">{level.two_wheeler_available}</span>
+                TW walk-in free:{' '}
+                <span className="font-semibold">{level.two_wheeler_available}</span>
               </p>
               <p className="text-sm text-slate-600">
-                FW available: <span className="font-semibold">{level.four_wheeler_available}</span>
+                FW walk-in free:{' '}
+                <span className="font-semibold">{level.four_wheeler_available}</span>
+              </p>
+              <p className="mt-2 text-xs text-sky-700">
+                Soft reserved TW/FW: {level.two_wheeler_soft_reserved ?? 0} /{' '}
+                {level.four_wheeler_soft_reserved ?? 0}
+              </p>
+              <p className="text-xs text-amber-700">
+                Soft active now TW/FW: {level.two_wheeler_soft_active_now ?? 0} /{' '}
+                {level.four_wheeler_soft_active_now ?? 0}
               </p>
             </div>
           ))}
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold">Soft reservations (no lot yet)</h2>
+          <p className="text-sm text-slate-500">
+            Capacity held for bookings until check-in. These do not pin a lot on the map.
+          </p>
+          {softReservations.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">No soft reservations.</p>
+          ) : (
+            <div className="mt-4 max-h-64 overflow-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b text-slate-500">
+                  <tr>
+                    <th className="px-2 py-2">Level</th>
+                    <th className="px-2 py-2">Cat</th>
+                    <th className="px-2 py-2">Vehicle</th>
+                    <th className="px-2 py-2">Window</th>
+                    <th className="px-2 py-2">Now</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {softReservations.map((b) => (
+                    <tr key={b.id} className="border-b border-slate-100">
+                      <td className="px-2 py-2">L{b.level}</td>
+                      <td className="px-2 py-2">{b.category}</td>
+                      <td className="px-2 py-2 font-medium">{b.vehicle_number}</td>
+                      <td className="px-2 py-2">
+                        {new Date(b.start_at).toLocaleString()} → {new Date(b.end_at).toLocaleString()}
+                      </td>
+                      <td className="px-2 py-2">
+                        {b.active_now ? (
+                          <span className="font-medium text-amber-700">ACTIVE</span>
+                        ) : (
+                          <span className="text-slate-500">upcoming</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">Walk-in lock</h2>
           <p className="text-sm text-slate-500">
-            Fills from the back of the floor. Uses unreserved capacity first; only then displaces the
-            farthest soft booking (latest start).
+            Fills from the back. Future soft bookings do not block today. If capacity is held by soft
+            bookings active right now, the least urgent one may be displaced.
           </p>
           <form onSubmit={onLock} className="mt-4 grid gap-3 md:grid-cols-4">
             <select

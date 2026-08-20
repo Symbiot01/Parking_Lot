@@ -69,7 +69,7 @@ class SlotSpaceOut(BaseModel):
     category: str
     lot_number: str
     distance_from_entry: int
-    status: Literal["FREE", "OCCUPIED", "BOOKED"]
+    status: Literal["FREE", "OCCUPIED", "BOOKED", "RESERVED"]
     vehicle_number: str | None = None
     user_id: str | None = None
     in_at: datetime | None = None

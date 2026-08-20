@@ -77,3 +77,5 @@ Earliest floor first, then lowest `distance_from_entry` (closest to entry). No r
 - Do not commit `.env` files; use `.env.example` / compose env vars instead
 
 See the design document in [README.md](./README.md) for HLD/LLD details (originally Django-oriented; implementation is FastAPI + SQLite as requested).
+
+For the live data model and function walkthrough, see [docs/ER_AND_FUNCTIONS.md](./docs/ER_AND_FUNCTIONS.md).

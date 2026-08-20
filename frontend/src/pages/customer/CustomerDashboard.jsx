@@ -126,8 +126,9 @@ export default function CustomerDashboard() {
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">Pre-book a slot</h2>
-          <p className="text-sm text-slate-500">
-            Closest free lot on the earliest available floor is allotted at booking time.
+                      <p className="text-sm text-slate-500">
+            Closest free lot on the earliest available floor for that timeslot.
+            Booking for tomorrow does not lock the lot for walk-in today.
           </p>
           <form onSubmit={onBook} className="mt-4 grid gap-3 md:grid-cols-2">
             <select

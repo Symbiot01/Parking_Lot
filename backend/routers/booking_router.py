@@ -11,9 +11,7 @@ from models import Booking, BookingStatus, User, UserRole
 from schemas import BookingCreateRequest, BookingOut, MessageOut
 from services.allocation import (
     AllocationError,
-    decrement_counter,
     find_closest_slot,
-    increment_counter,
 )
 
 router = APIRouter(prefix="/api/v1/bookings", tags=["bookings"])
@@ -76,9 +74,8 @@ def create_booking(
             status=BookingStatus.CONFIRMED.value,
         )
         db.add(booking)
-        # Withhold reserved capacity from walk-in when booking covers "now" or starts soon —
-        # always decrement at book time per chosen production rule.
-        decrement_counter(db, slot.level, payload.vehicle_category)
+        # Future bookings reserve the timeslot only. Do not reduce "available now"
+        # counters or lock the lot for walk-in today.
         db.commit()
         db.refresh(booking)
     except AllocationError as exc:
@@ -174,6 +171,5 @@ def cancel_booking(
         )
 
     booking.status = BookingStatus.CANCELLED.value
-    increment_counter(db, booking.level, booking.category)
     db.commit()
     return MessageOut(message="Booking cancelled", code="CANCELLED")

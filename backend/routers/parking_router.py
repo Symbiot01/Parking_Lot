@@ -16,6 +16,7 @@ from schemas import (
     LockRequest,
     LockResponse,
     SlotSpaceOut,
+    SoftBookingAdminOut,
     UnlockRequest,
     UnlockResponse,
 )
@@ -26,7 +27,11 @@ from services.allocation import (
     vehicle_has_open_stay,
 )
 from services.billing import calculate_fee
-from services.floor_snapshot import load_floor_snapshot, recompute_counters_from_snapshots
+from services.floor_snapshot import (
+    load_floor_snapshot,
+    recompute_counters_from_snapshots,
+    soft_reservation_summary,
+)
 
 router = APIRouter(prefix="/api/v1/parking", tags=["parking"])
 
@@ -36,18 +41,28 @@ def availability(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Any:
+    # Always recompute so admin sees live walk-in quota (not stale zeros)
+    recompute_counters_from_snapshots(db)
+    db.commit()
+
     spaces = db.scalars(select(ParkingSpace).order_by(ParkingSpace.level.asc())).all()
     if user.role == UserRole.ADMIN.value:
-        return AvailabilityResponseAdmin(
-            levels=[
+        summary = {row["level"]: row for row in soft_reservation_summary(db)}
+        levels = []
+        for s in spaces:
+            row = summary.get(s.level, {})
+            levels.append(
                 AvailabilityLevelAdmin(
                     level=s.level,
-                    two_wheeler_available=s.twa,
-                    four_wheeler_available=s.fwa,
+                    two_wheeler_available=row.get("tw_available_walkin", s.twa),
+                    four_wheeler_available=row.get("fw_available_walkin", s.fwa),
+                    two_wheeler_soft_reserved=row.get("tw_soft_total", 0),
+                    four_wheeler_soft_reserved=row.get("fw_soft_total", 0),
+                    two_wheeler_soft_active_now=row.get("tw_soft_active_now", 0),
+                    four_wheeler_soft_active_now=row.get("fw_soft_active_now", 0),
                 )
-                for s in spaces
-            ]
-        )
+            )
+        return AvailabilityResponseAdmin(levels=levels)
     return AvailabilityResponsePublic(
         levels=[
             AvailabilityLevelPublic(
@@ -58,6 +73,42 @@ def availability(
             for s in spaces
         ]
     )
+
+
+@router.get("/soft-reservations", response_model=list[SoftBookingAdminOut])
+def list_soft_reservations(
+    _: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[SoftBookingAdminOut]:
+    """Soft capacity bookings (no lot yet) — shown in admin reserved list."""
+    now = datetime.now(timezone.utc)
+    rows = db.scalars(
+        select(Booking)
+        .where(
+            Booking.status == BookingStatus.CONFIRMED.value,
+            Booking.lot.is_(None),
+            Booking.end_at > now,
+        )
+        .order_by(Booking.level.asc(), Booking.start_at.asc())
+    ).all()
+    out: list[SoftBookingAdminOut] = []
+    for b in rows:
+        start = b.start_at if b.start_at.tzinfo else b.start_at.replace(tzinfo=timezone.utc)
+        end = b.end_at if b.end_at.tzinfo else b.end_at.replace(tzinfo=timezone.utc)
+        out.append(
+            SoftBookingAdminOut(
+                id=b.id,
+                level=b.level,
+                category=b.category,
+                vehicle_number=b.vehicle_number,
+                start_at=b.start_at,
+                end_at=b.end_at,
+                status=b.status,
+                user_id=b.user_id,
+                active_now=start <= now < end,
+            )
+        )
+    return out
 
 
 @router.get("/spaces", response_model=list[SlotSpaceOut])

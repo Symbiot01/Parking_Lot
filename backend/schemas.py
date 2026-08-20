@@ -48,6 +48,10 @@ class AvailabilityLevelAdmin(BaseModel):
     level: int
     two_wheeler_available: int
     four_wheeler_available: int
+    two_wheeler_soft_reserved: int = 0
+    four_wheeler_soft_reserved: int = 0
+    two_wheeler_soft_active_now: int = 0
+    four_wheeler_soft_active_now: int = 0
 
 
 class AvailabilityLevelPublic(BaseModel):
@@ -62,6 +66,18 @@ class AvailabilityResponseAdmin(BaseModel):
 
 class AvailabilityResponsePublic(BaseModel):
     levels: list[AvailabilityLevelPublic]
+
+
+class SoftBookingAdminOut(BaseModel):
+    id: str
+    level: int
+    category: str
+    vehicle_number: str
+    start_at: datetime
+    end_at: datetime
+    status: str
+    user_id: str
+    active_now: bool
 
 
 class SlotSpaceOut(BaseModel):

@@ -24,6 +24,6 @@ USER appuser
 ENV DATABASE_URL=sqlite:////app/data/parking.db \
     CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
-EXPOSE 8000
+EXPOSE 8010
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

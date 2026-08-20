@@ -1,0 +1,49 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: parking-backend
+    ports:
+      - "8000:8000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string-in-production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      DATABASE_URL: sqlite:////app/data/parking.db
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
+      PARKING_LEVEL_COUNT: ${PARKING_LEVEL_COUNT:-3}
+      TW_SLOTS_PER_LEVEL: ${TW_SLOTS_PER_LEVEL:-10}
+      FW_SLOTS_PER_LEVEL: ${FW_SLOTS_PER_LEVEL:-10}
+      TW_HOURLY_RATE: ${TW_HOURLY_RATE:-20.00}
+      FW_HOURLY_RATE: ${FW_HOURLY_RATE:-40.00}
+      TW_LATE_HOURLY_RATE: ${TW_LATE_HOURLY_RATE:-30.00}
+      FW_LATE_HOURLY_RATE: ${FW_LATE_HOURLY_RATE:-60.00}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-AdminPass123!}
+      ADMIN_NAME: ${ADMIN_NAME:-Parking Admin}
+    volumes:
+      - parking_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    container_name: parking-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  parking_data:

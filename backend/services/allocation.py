@@ -201,27 +201,9 @@ def increment_counter(db: Session, level: int, category: str) -> None:
 
 
 def recompute_availability_counters(db: Session) -> None:
-    """Set twa/fwa from capacity minus open stays and bookings covering now only."""
-    now = _now()
-    spaces = db.scalars(select(ParkingSpace)).all()
-    for space in spaces:
-        for category, capacity_attr, avail_attr in (
-            ("TW", "tw_capacity", "twa"),
-            ("FW", "fw_capacity", "fwa"),
-        ):
-            capacity = getattr(space, capacity_attr)
-            slots = db.scalars(
-                select(ParkingSlot).where(
-                    ParkingSlot.level == space.level,
-                    ParkingSlot.category == category,
-                    ParkingSlot.is_active.is_(True),
-                )
-            ).all()
-            used = 0
-            for slot in slots:
-                if not is_slot_free_now(db, slot):
-                    used += 1
-            setattr(space, avail_attr, max(0, capacity - used))
+    from services.floor_snapshot import recompute_counters_from_snapshots
+
+    recompute_counters_from_snapshots(db)
 
 
 def get_open_history(

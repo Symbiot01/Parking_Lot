@@ -33,6 +33,7 @@ class BookingStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
     CONSUMED = "CONSUMED"
     NO_SHOW = "NO_SHOW"
+    DISPLACED = "DISPLACED"  # soft reserve released so walk-in could take capacity
 
 
 def _uuid() -> str:
@@ -112,11 +113,14 @@ class Booking(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    slot_id: Mapped[str] = mapped_column(String(36), ForeignKey("parking_slots.id"), nullable=False)
+    slot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("parking_slots.id"), nullable=True
+    )
     vehicle_number: Mapped[str] = mapped_column(String(15), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(2), nullable=False)
     level: Mapped[int] = mapped_column(Integer, nullable=False)
-    lot: Mapped[str] = mapped_column(String(32), nullable=False)
+    # NULL until check-in / visit — soft capacity reservation only
+    lot: Mapped[str | None] = mapped_column(String(32), nullable=True)
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(
@@ -125,7 +129,7 @@ class Booking(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="bookings")
-    slot: Mapped["ParkingSlot"] = relationship(back_populates="bookings")
+    slot: Mapped["ParkingSlot | None"] = relationship(back_populates="bookings")
     histories: Mapped[list["ParkingHistory"]] = relationship(back_populates="booking")
 
 

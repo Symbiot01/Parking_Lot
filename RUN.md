@@ -79,3 +79,5 @@ Earliest floor first, then lowest `distance_from_entry` (closest to entry). No r
 See the design document in [README.md](./README.md) for HLD/LLD details (originally Django-oriented; implementation is FastAPI + SQLite as requested).
 
 For the live data model and function walkthrough, see [docs/ER_AND_FUNCTIONS.md](./docs/ER_AND_FUNCTIONS.md).
+
+Soft reservation / back-fill allocator design: [docs/SOFT_RESERVATION_ALLOCATOR.md](./docs/SOFT_RESERVATION_ALLOCATOR.md).

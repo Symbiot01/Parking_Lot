@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-*
+parking.db
+parking.db-shm
+parking.db-wal
+node_modules/
+frontend/dist/
+.DS_Store
+*.log
+.idea/
+.vscode/

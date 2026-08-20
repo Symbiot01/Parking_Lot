@@ -1,4 +1,4 @@
-# Build stage
+# Build
 FROM node:22-alpine AS build
 
 WORKDIR /app
@@ -8,18 +8,20 @@ RUN npm ci
 
 COPY . .
 
-# Browser-facing API URL (published docker-compose port)
-ARG VITE_API_URL=http://localhost:8000
+ARG VITE_API_URL=http://localhost:8010
 ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
-# Runtime stage
-FROM nginx:1.27-alpine
+# Runtime — static files via `serve` (no nginx)
+FROM node:22-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
 
-EXPOSE 80
+RUN npm install -g serve@14
 
-CMD ["nginx", "-g", "daemon off;"]
+COPY --from=build /app/dist ./dist
+
+EXPOSE 8011
+
+CMD ["serve", "-s", "dist", "-l", "8011"]

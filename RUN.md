@@ -23,9 +23,10 @@ docker build -t parking-backend ./backend
 docker build -t parking-frontend --build-arg VITE_API_URL=http://localhost:8000 ./frontend
 
 docker run --rm -p 8000:8000 -v parking_data:/app/data parking-backend
-docker run --rm -p 3000:80 parking-frontend
+docker run --rm -p 3000:3000 parking-frontend
 ```
 
+Backend CORS allows all origins (`*`) so the browser is not blocked from any frontend host.
 ## Local quick start (without Docker)
 
 ### Backend

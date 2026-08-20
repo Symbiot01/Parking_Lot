@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import SessionLocal, init_db
 from routers import auth_router, booking_router, parking_router
 from seed import seed_all
+from services.allocation import recompute_availability_counters
 
 
 @asynccontextmanager
@@ -14,6 +15,8 @@ async def lifespan(_: FastAPI):
     db = SessionLocal()
     try:
         seed_all(db)
+        recompute_availability_counters(db)
+        db.commit()
     finally:
         db.close()
     yield

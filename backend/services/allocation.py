@@ -109,18 +109,22 @@ def is_slot_free_for_window(
 
 
 def is_slot_free_now(db: Session, slot: ParkingSlot) -> bool:
+    """Walk-in availability: only block open stays and bookings covering *now*.
+
+    A booking for tomorrow must not lock the lot for today.
+    """
     now = _now()
     if lot_has_open_stay(db, slot.lot_number):
         return False
-    # Any active confirmed booking reserves the lot (matches counter decrement-at-book)
-    reserved = db.scalars(
+    covering = db.scalars(
         select(Booking).where(
             Booking.lot == slot.lot_number,
             Booking.status == BookingStatus.CONFIRMED.value,
+            Booking.start_at <= now,
             Booking.end_at > now,
         )
     ).first()
-    return reserved is None
+    return covering is None
 
 
 def get_levels(db: Session, parking_level: int | None) -> list[ParkingSpace]:
@@ -196,6 +200,30 @@ def increment_counter(db: Session, level: int, category: str) -> None:
         space.fwa = min(space.fwa + 1, space.fw_capacity)
 
 
+def recompute_availability_counters(db: Session) -> None:
+    """Set twa/fwa from capacity minus open stays and bookings covering now only."""
+    now = _now()
+    spaces = db.scalars(select(ParkingSpace)).all()
+    for space in spaces:
+        for category, capacity_attr, avail_attr in (
+            ("TW", "tw_capacity", "twa"),
+            ("FW", "fw_capacity", "fwa"),
+        ):
+            capacity = getattr(space, capacity_attr)
+            slots = db.scalars(
+                select(ParkingSlot).where(
+                    ParkingSlot.level == space.level,
+                    ParkingSlot.category == category,
+                    ParkingSlot.is_active.is_(True),
+                )
+            ).all()
+            used = 0
+            for slot in slots:
+                if not is_slot_free_now(db, slot):
+                    used += 1
+            setattr(space, avail_attr, max(0, capacity - used))
+
+
 def get_open_history(
     db: Session, vehicle_number: str, lot: str
 ) -> ParkingHistory | None:
@@ -221,15 +249,30 @@ def slot_status(db: Session, slot: ParkingSlot) -> tuple[str, ParkingHistory | N
         return "OCCUPIED", open_hist, None
 
     now = _now()
+    covering = db.scalars(
+        select(Booking)
+        .where(
+            Booking.lot == slot.lot_number,
+            Booking.status == BookingStatus.CONFIRMED.value,
+            Booking.start_at <= now,
+            Booking.end_at > now,
+        )
+        .order_by(Booking.start_at.asc())
+    ).first()
+    if covering:
+        return "BOOKED", None, covering
+
     upcoming = db.scalars(
         select(Booking)
         .where(
             Booking.lot == slot.lot_number,
             Booking.status == BookingStatus.CONFIRMED.value,
+            Booking.start_at > now,
             Booking.end_at > now,
         )
         .order_by(Booking.start_at.asc())
     ).first()
     if upcoming:
-        return "BOOKED", None, upcoming
+        # Reserved for a future timeslot — still free for walk-in today
+        return "RESERVED", None, upcoming
     return "FREE", None, None

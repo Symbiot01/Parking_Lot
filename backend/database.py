@@ -46,3 +46,52 @@ def init_db() -> None:
     )
 
     Base.metadata.create_all(bind=engine)
+    _migrate_bookings_nullable_lot()
+
+
+def _migrate_bookings_nullable_lot() -> None:
+    """SQLite: rebuild bookings if lot/slot_id were created NOT NULL."""
+    if not settings.database_url.startswith("sqlite"):
+        return
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(bookings)").fetchall()
+        if not rows:
+            return
+        cols = {r[1]: r for r in rows}  # name -> row
+        lot_notnull = cols.get("lot") and cols["lot"][3] == 1
+        slot_notnull = cols.get("slot_id") and cols["slot_id"][3] == 1
+        if not lot_notnull and not slot_notnull:
+            return
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS bookings_new (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                slot_id VARCHAR(36),
+                vehicle_number VARCHAR(15) NOT NULL,
+                category VARCHAR(2) NOT NULL,
+                level INTEGER NOT NULL,
+                lot VARCHAR(32),
+                start_at DATETIME NOT NULL,
+                end_at DATETIME NOT NULL,
+                status VARCHAR(16) NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users (id),
+                FOREIGN KEY(slot_id) REFERENCES parking_slots (id)
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO bookings_new
+            (id, user_id, slot_id, vehicle_number, category, level, lot, start_at, end_at, status, created_at)
+            SELECT id, user_id, slot_id, vehicle_number, category, level, lot, start_at, end_at, status, created_at
+            FROM bookings
+            """
+        )
+        conn.exec_driver_sql("DROP TABLE bookings")
+        conn.exec_driver_sql("ALTER TABLE bookings_new RENAME TO bookings")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_bookings_user_id ON bookings (user_id)")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_bookings_vehicle_number ON bookings (vehicle_number)"
+        )

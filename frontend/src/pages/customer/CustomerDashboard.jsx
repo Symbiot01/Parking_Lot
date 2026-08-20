@@ -64,7 +64,7 @@ export default function CustomerDashboard() {
       }
       const { data } = await api.post('/api/v1/bookings', body)
       setMessage(
-        `Booked ${data.parking_lot_number} on level ${data.parking_level} (${data.vehicle_category})`,
+        `Reserved capacity on level ${data.parking_level} (${data.vehicle_category}). Lot assigned at check-in.`,
       )
       await load()
     } catch (err) {
@@ -81,6 +81,21 @@ export default function CustomerDashboard() {
     try {
       await api.post(`/api/v1/bookings/${id}/cancel`)
       setMessage('Booking cancelled')
+      await load()
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onCheckIn(id) {
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data } = await api.post(`/api/v1/bookings/${id}/check-in`)
+      setMessage(`Checked in — lot ${data.parking_lot_number} on level ${data.parking_level}`)
       await load()
     } catch (err) {
       setError(getErrorMessage(err))
@@ -125,10 +140,10 @@ export default function CustomerDashboard() {
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold">Pre-book a slot</h2>
-                      <p className="text-sm text-slate-500">
-            Closest free lot on the earliest available floor for that timeslot.
-            Booking for tomorrow does not lock the lot for walk-in today.
+          <h2 className="text-lg font-semibold">Pre-book capacity</h2>
+          <p className="text-sm text-slate-500">
+            Reserves a spot on a floor for your timeslot. The physical lot is assigned when you check in.
+            Availability today is reduced by soft reservations.
           </p>
           <form onSubmit={onBook} className="mt-4 grid gap-3 md:grid-cols-2">
             <select
@@ -180,7 +195,7 @@ export default function CustomerDashboard() {
               disabled={busy}
               className="rounded-lg bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-60 md:col-span-2"
             >
-              Book closest slot
+              Book capacity (lot at visit)
             </button>
           </form>
         </section>
@@ -202,32 +217,56 @@ export default function CustomerDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {bookings.map((b) => (
-                    <tr key={b.id} className="border-b border-slate-100">
-                      <td className="px-2 py-3 font-medium">
-                        L{b.parking_level} · {b.parking_lot_number}
-                      </td>
-                      <td className="px-2 py-3">
-                        {b.vehicle_number} ({b.vehicle_category})
-                      </td>
-                      <td className="px-2 py-3">
-                        {new Date(b.start_at).toLocaleString()} → {new Date(b.end_at).toLocaleString()}
-                      </td>
-                      <td className="px-2 py-3">{b.status}</td>
-                      <td className="px-2 py-3 text-right">
-                        {b.status === 'CONFIRMED' && new Date(b.start_at) > new Date() ? (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => onCancel(b.id)}
-                            className="rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100"
-                          >
-                            Cancel
-                          </button>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
+                  {bookings.map((b) => {
+                    const start = new Date(b.start_at)
+                    const end = new Date(b.end_at)
+                    const nowDt = new Date()
+                    const canCheckIn =
+                      b.status === 'CONFIRMED' &&
+                      !b.parking_lot_number &&
+                      nowDt >= new Date(start.getTime() - 15 * 60 * 1000) &&
+                      nowDt < end
+                    const canCancel =
+                      (b.status === 'CONFIRMED' || b.status === 'DISPLACED') &&
+                      !b.parking_lot_number &&
+                      start > nowDt
+                    return (
+                      <tr key={b.id} className="border-b border-slate-100">
+                        <td className="px-2 py-3 font-medium">
+                          L{b.parking_level} · {b.parking_lot_number || 'Assigned at visit'}
+                        </td>
+                        <td className="px-2 py-3">
+                          {b.vehicle_number} ({b.vehicle_category})
+                        </td>
+                        <td className="px-2 py-3">
+                          {start.toLocaleString()} → {end.toLocaleString()}
+                        </td>
+                        <td className="px-2 py-3">{b.status}</td>
+                        <td className="px-2 py-3 text-right space-x-2">
+                          {canCheckIn ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => onCheckIn(b.id)}
+                              className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                            >
+                              Check in
+                            </button>
+                          ) : null}
+                          {canCancel ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => onCancel(b.id)}
+                              className="rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

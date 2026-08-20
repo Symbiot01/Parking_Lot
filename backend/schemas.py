@@ -137,7 +137,7 @@ class BookingOut(BaseModel):
     vehicle_category: str
     vehicle_number: str
     parking_level: int
-    parking_lot_number: str
+    parking_lot_number: str | None = None
     start_at: datetime
     end_at: datetime
     status: str

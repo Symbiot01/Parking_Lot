@@ -123,7 +123,8 @@ export default function WorkerDashboard() {
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">Walk-in lock</h2>
           <p className="text-sm text-slate-500">
-            Assigns the closest free slot. Leave level blank to fill earliest floors first.
+            Fills from the back of the floor. Uses unreserved capacity first; only then displaces the
+            farthest soft booking (latest start).
           </p>
           <form onSubmit={onLock} className="mt-4 grid gap-3 md:grid-cols-4">
             <select

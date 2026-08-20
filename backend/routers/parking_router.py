@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user, require_admin
 from database import get_db
-from models import BookingStatus, ParkingSlot, ParkingSpace, ParkingHistory, User, UserRole
+from models import Booking, BookingStatus, ParkingHistory, ParkingSlot, ParkingSpace, User, UserRole
 from schemas import (
     AvailabilityLevelAdmin,
     AvailabilityLevelPublic,
@@ -21,14 +21,12 @@ from schemas import (
 )
 from services.allocation import (
     AllocationError,
-    decrement_counter,
-    find_closest_slot,
     get_open_history,
-    increment_counter,
     slot_status,
     vehicle_has_open_stay,
 )
 from services.billing import calculate_fee
+from services.floor_snapshot import load_floor_snapshot, recompute_counters_from_snapshots
 
 router = APIRouter(prefix="/api/v1/parking", tags=["parking"])
 
@@ -110,23 +108,60 @@ def lock_space(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ) -> LockResponse:
+    """Walk-in: fill from the back; unreserved quota first; else displace farthest soft booking."""
     if vehicle_has_open_stay(db, payload.vehicle_number):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "VEHICLE_ALREADY_PARKED", "message": "Vehicle already parked"},
         )
+
     try:
-        slot = find_closest_slot(
-            db,
-            category=payload.vehicle_category,
-            parking_level=payload.parking_level,
-        )
+        levels: list[int]
+        if payload.parking_level is not None:
+            levels = [payload.parking_level]
+        else:
+            levels = [
+                s.level
+                for s in db.scalars(select(ParkingSpace).order_by(ParkingSpace.level.asc())).all()
+            ]
+
+        chosen_slot = None
+        chosen_level = None
+        displaced_id = None
+
+        for level in levels:
+            snap = load_floor_snapshot(db, level, payload.vehicle_category)
+            if snap is None:
+                if payload.parking_level is not None:
+                    raise AllocationError("VALIDATION_ERROR", "Parking level does not exist")
+                continue
+
+            slot_view, displaced = snap.pick_slot_back_fill(allow_steal_soft=True)
+            if slot_view is None:
+                if payload.parking_level is not None:
+                    raise AllocationError("LEVEL_FULL", "No available slots on this level")
+                continue
+
+            chosen_slot = slot_view
+            chosen_level = level
+            if displaced is not None:
+                displaced_id = displaced.id
+            break
+
+        if chosen_slot is None or chosen_level is None:
+            raise AllocationError("NO_SLOT", "No available parking slots")
+
+        if displaced_id is not None:
+            soft = db.get(Booking, displaced_id)
+            if soft and soft.status == BookingStatus.CONFIRMED.value and soft.lot is None:
+                soft.status = BookingStatus.DISPLACED.value
+
         now = datetime.now(timezone.utc)
         history = ParkingHistory(
-            level=slot.level,
+            level=chosen_level,
             type=payload.vehicle_category,
             vehicle_number=payload.vehicle_number,
-            lot=slot.lot_number,
+            lot=chosen_slot.lot_number,
             in_at=now,
             out_at=None,
             fee=None,
@@ -134,7 +169,7 @@ def lock_space(
             booking_id=None,
         )
         db.add(history)
-        decrement_counter(db, slot.level, payload.vehicle_category)
+        recompute_counters_from_snapshots(db)
         db.commit()
         db.refresh(history)
     except AllocationError as exc:
@@ -147,8 +182,8 @@ def lock_space(
     return LockResponse(
         vehicle_category=payload.vehicle_category,
         vehicle_number=payload.vehicle_number,
-        parking_level=slot.level,
-        parking_lot_number=slot.lot_number,
+        parking_level=chosen_level,
+        parking_lot_number=chosen_slot.lot_number,
         locking_time=history.in_at,
         user_id=admin.id,
     )
@@ -174,7 +209,7 @@ def unlock_space(
     history.fee = fee
     if history.booking_id and history.booking is not None:
         history.booking.status = BookingStatus.CONSUMED.value
-    increment_counter(db, history.level, history.type)
+    recompute_counters_from_snapshots(db)
     db.commit()
 
     return UnlockResponse(
